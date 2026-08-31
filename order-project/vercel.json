@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "functions": {
+    "api/order.js": {
+      "memory": 1024,
+      "maxDuration": 10
+    },
+    "api/square-webhook.js": {
+      "memory": 1024,
+      "maxDuration": 10
+    }
+  }
+}
