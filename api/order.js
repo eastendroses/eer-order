@@ -80,8 +80,9 @@ module.exports = async (req, res) => {
     let note = product + " - " + scent + " (x" + quantity + ")";
     if (label) note += " | Label: " + String(label);
 
-    // Step 1: create the order with 8% sales tax via the Orders API.
-    const orderBody = {
+    // Create the payment link with 8% sales tax at the order level
+    // (same order shape the Orders API CreateOrder endpoint expects).
+    const body = {
       idempotency_key: crypto.randomUUID(),
       order: {
         location_id: locationId,
@@ -97,35 +98,7 @@ module.exports = async (req, res) => {
           percentage: "8",
           scope: "ORDER"
         }]
-      }
-    };
-
-    const orderRes = await fetch(SQUARE_API + "/v2/orders", {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + SQUARE_ACCESS_TOKEN,
-        "Content-Type": "application/json",
-        "Square-Version": SQUARE_VERSION
       },
-      body: JSON.stringify(orderBody)
-    });
-
-    const orderJson = await orderRes.json();
-
-    if (!orderRes.ok || !orderJson.order || !orderJson.order.id) {
-      const detail = orderJson.errors && orderJson.errors.length
-        ? " [" + orderJson.errors.map(function (e) { return e.code; }).join(", ") + "]"
-        : "";
-      return res.status(502).json({
-        success: false,
-        error: "Square could not create the order" + detail
-      });
-    }
-
-    // Step 2: create the payment link for that order.
-    const body = {
-      idempotency_key: crypto.randomUUID(),
-      order: { order_id: orderJson.order.id },
       payment_note: note,
       checkout_options: {
         redirect_url: baseUrl + "/?ref=" + ref
