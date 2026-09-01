@@ -113,10 +113,12 @@ module.exports = async (req, res) => {
     const orderJson = await orderRes.json();
 
     if (!orderRes.ok || !orderJson.order || !orderJson.order.id) {
+      const detail = orderJson.errors && orderJson.errors.length
+        ? " [" + orderJson.errors.map(function (e) { return e.code; }).join(", ") + "]"
+        : "";
       return res.status(502).json({
         success: false,
-        error: "Square could not create the order",
-        detail: orderJson.errors || orderJson
+        error: "Square could not create the order" + detail
       });
     }
 
@@ -143,10 +145,12 @@ module.exports = async (req, res) => {
     const json = await resp.json();
 
     if (!resp.ok || !json.payment_link || !json.payment_link.url) {
+      const detail = json.errors && json.errors.length
+        ? " [" + json.errors.map(function (e) { return e.code; }).join(", ") + "]"
+        : "";
       return res.status(502).json({
         success: false,
-        error: "Square could not create a payment link",
-        detail: json.errors || json
+        error: "Square could not create a payment link" + detail
       });
     }
 
