@@ -80,7 +80,8 @@ module.exports = async (req, res) => {
     let note = product + " - " + scent + " (x" + quantity + ")";
     if (label) note += " | Label: " + String(label);
 
-    const body = {
+    // Step 1: create the order with 8% sales tax via the Orders API.
+    const orderBody = {
       idempotency_key: crypto.randomUUID(),
       order: {
         location_id: locationId,
@@ -88,16 +89,41 @@ module.exports = async (req, res) => {
         line_items: [{
           name: product + " - " + scent,
           quantity: String(quantity),
-          base_price_money: { amount: unitPriceCents, currency: "USD" },
-          taxes: [{
-            uid: "sales-tax",
-            name: "Sales Tax",
-            type: "ADDITIVE",
-            percentage: "8.0",
-            scope: "LINE_ITEM"
-          }]
+          base_price_money: { amount: unitPriceCents, currency: "USD" }
+        }],
+        taxes: [{
+          uid: "state-sales-tax",
+          name: "Sales Tax",
+          percentage: "8",
+          scope: "ORDER"
         }]
+      }
+    };
+
+    const orderRes = await fetch(SQUARE_API + "/v2/orders", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + SQUARE_ACCESS_TOKEN,
+        "Content-Type": "application/json",
+        "Square-Version": SQUARE_VERSION
       },
+      body: JSON.stringify(orderBody)
+    });
+
+    const orderJson = await orderRes.json();
+
+    if (!orderRes.ok || !orderJson.order || !orderJson.order.id) {
+      return res.status(502).json({
+        success: false,
+        error: "Square could not create the order",
+        detail: orderJson.errors || orderJson
+      });
+    }
+
+    // Step 2: create the payment link for that order.
+    const body = {
+      idempotency_key: crypto.randomUUID(),
+      order: { order_id: orderJson.order.id },
       payment_note: note,
       checkout_options: {
         redirect_url: baseUrl + "/?ref=" + ref
