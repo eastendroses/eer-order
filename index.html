@@ -62,7 +62,7 @@
     margin: 0 0 6px;
   }
   #eer-order .field { margin-bottom: 18px; }
-  #eer-order select, #eer-order input[type="number"] {
+  #eer-order select, #eer-order input[type="number"], #eer-order input[type="text"] {
     width: 100%;
     padding: 14px 12px;
     font-size: 1.05rem;
@@ -135,7 +135,7 @@
   @media (max-width: 600px) {
     #eer-order .brand { font-size: 1.5rem; }
     #eer-order .card { padding: 22px 18px; }
-    #eer-order select, #eer-order input[type="number"] { font-size: 1.2rem; padding: 18px 14px; }
+    #eer-order select, #eer-order input[type="number"], #eer-order input[type="text"] { font-size: 1.2rem; padding: 18px 14px; }
     #eer-order button { font-size: 1.3rem; padding: 20px 22px; }
     #eer-order label { font-size: 1rem; }
   }
@@ -157,6 +157,11 @@
     <div class="field">
       <label for="eer-scent">Fragrance</label>
       <select id="eer-scent"></select>
+    </div>
+
+    <div class="field" id="eer-label-field" style="display:none;">
+      <label for="eer-label">Label Text</label>
+      <input type="text" id="eer-label" placeholder="ex. Happy Birthday!" maxlength="60">
     </div>
 
     <div class="field">
@@ -184,18 +189,20 @@
   // 1) Products. "price" is shown for reference. The payment link is
   //    created fresh by /api/order for each order (no links here).
   //    "scents" is the list of available scents for that product.
+  var CANDLE_SCENTS = [
+    "Lavender Oasis", "Fresh Eucalyptus", "Blooming Meadow", "Uncharted Forest",
+    "Cashmere Plum", "Pomegranate Cider", "Midnight Moon", "Spiced Pear",
+    "Tonka and Oud", "Fresh Coffee", "Cottage Garden", "Amber Musk",
+    "Cinnamon Churro", "Laundry Day", "Cherry Blossom", "Morning Dewdrops",
+    "Gathered", "Egyptian Amber", "Harvest Moon", "Maple Walnut Glaze",
+    "Golden Orchard", "Forest Fog"
+  ];
+
   var PRODUCTS = [
     {
       name: "Candle",
       price: "23.00",
-      scents: [
-        "Lavender Oasis", "Fresh Eucalyptus", "Blooming Meadow", "Uncharted Forest",
-        "Cashmere Plum", "Pomegranate Cider", "Midnight Moon", "Spiced Pear",
-        "Tonka and Oud", "Fresh Coffee", "Cottage Garden", "Amber Musk",
-        "Cinnamon Churro", "Laundry Day", "Cherry Blossom", "Morning Dewdrops",
-        "Gathered", "Egyptian Amber", "Harvest Moon", "Maple Walnut Glaze",
-        "Golden Orchard", "Forest Fog"
-      ]
+      scents: CANDLE_SCENTS
     },
     {
       name: "Diffuser",
@@ -208,14 +215,7 @@
     {
       name: "Wax Melts",
       price: "8.70",
-      scents: [
-        "Lavender Oasis", "Fresh Eucalyptus", "Blooming Meadow", "Uncharted Forest",
-        "Cashmere Plum", "Pomegranate Cider", "Midnight Moon", "Spiced Pear",
-        "Tonka and Oud", "Fresh Coffee", "Cottage Garden", "Amber Musk",
-        "Cinnamon Churro", "Laundry Day", "Cherry Blossom", "Morning Dewdrops",
-        "Gathered", "Egyptian Amber", "Harvest Moon", "Maple Walnut Glaze",
-        "Golden Orchard", "Forest Fog"
-      ]
+      scents: CANDLE_SCENTS
     },
     {
       name: "Room Spray",
@@ -226,6 +226,13 @@
         "Gathered", "Egyptian Amber", "Harvest Moon", "Maple Walnut Glaze",
         "Golden Orchard", "Forest Fog"
       ]
+    },
+    {
+      name: "Tulip Bouquet",
+      price: "25.00",
+      defaultScent: "Tulip Bouquet - *Standard*",
+      scents: ["Tulip Bouquet - *Standard*"].concat(CANDLE_SCENTS),
+      hasLabelText: true
     }
   ];
   // ============================================================
@@ -235,6 +242,8 @@
   var productSel = document.getElementById("eer-product");
   var scentSel = document.getElementById("eer-scent");
   var qtyInput = document.getElementById("eer-qty");
+  var labelInput = document.getElementById("eer-label");
+  var labelField = document.getElementById("eer-label-field");
   var priceLine = document.getElementById("eer-price");
   var submitBtn = document.getElementById("eer-submit");
   var statusEl = document.getElementById("eer-status");
@@ -266,6 +275,17 @@
       scentSel.appendChild(opt);
     }
     priceLine.textContent = "Price: $" + prod.price;
+    updateLabelField();
+  }
+
+  function updateLabelField() {
+    var prod = currentProduct();
+    if (prod.hasLabelText) {
+      labelField.style.display = "block";
+    } else {
+      labelField.style.display = "none";
+      labelInput.value = "";
+    }
   }
 
   productSel.addEventListener("change", refreshScent);
@@ -276,6 +296,14 @@
     var qty = parseInt(qtyInput.value, 10);
     if (isNaN(qty) || qty < 1) qty = 1;
 
+    var label = labelInput.value.trim();
+    if (prod.hasLabelText && label === "") {
+      statusEl.textContent = "Please enter label text for your tulip bouquet.";
+      statusEl.className = "status error";
+      labelInput.focus();
+      return;
+    }
+
     submitBtn.disabled = true;
     statusEl.textContent = "Creating your secure payment link...";
     statusEl.className = "status";
@@ -285,6 +313,7 @@
       scent: scent,
       qty: qty
     };
+    if (prod.hasLabelText) payload.label = label;
 
     fetch("/api/order", {
       method: "POST",
