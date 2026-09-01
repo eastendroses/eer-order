@@ -123,8 +123,6 @@ module.exports = async (req, res) => {
     return res.status(422).json({ error: "Missing payment id" });
   }
 
-  console.log("EER_WEBHOOK event:", event.type, "payment:", paymentId);
-
   try {
     const pay = (await fetchSquare("/v2/payments/" + paymentId)).payment || {};
 
@@ -170,8 +168,6 @@ module.exports = async (req, res) => {
         status: "PAID"
       };
 
-      console.log("EER_WEBHOOK payload:", JSON.stringify(payload));
-
       try {
         const gRes = await fetch(GOOGLE_WEB_APP_URL, {
           method: "POST",
@@ -188,7 +184,6 @@ module.exports = async (req, res) => {
       } catch (err) {
         sheetResult = { written: false, error: err.toString() };
       }
-    console.log("EER_WEBHOOK sheet result:", JSON.stringify(sheetResult));
     }
 
     return res.status(200).json({
