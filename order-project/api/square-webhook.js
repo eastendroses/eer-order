@@ -134,6 +134,13 @@ module.exports = async (req, res) => {
 
     const email = pay.buyer_email_address || "";
 
+    // Label text (for products like Tulip Bouquet) travels in the
+    // Square payment note as '| Label: <text>' and is logged separately.
+    let labelText = "";
+    const note = pay.note || "";
+    const labelMatch = note.match(/Label:\s*(.*)/);
+    if (labelMatch) labelText = labelMatch[1].trim();
+
     let customerName = "";
     if (pay.customer_id) {
       try {
@@ -155,6 +162,7 @@ module.exports = async (req, res) => {
         scent: info.scent,
         qty: info.qty,
         price: totalUsd,
+        label: labelText,
         name: customerName,
         email: email,
         status: "PAID"

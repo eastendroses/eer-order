@@ -41,7 +41,7 @@ module.exports = async (req, res) => {
     return res.status(500).json({ success: false, error: "SQUARE_ACCESS_TOKEN not configured" });
   }
 
-  const { product, scent, qty } = req.body || {};
+  const { product, scent, qty, label } = req.body || {};
   if (!product || !scent) {
     return res.status(400).json({ success: false, error: "Missing product or scent" });
   }
@@ -76,6 +76,9 @@ module.exports = async (req, res) => {
       return res.status(500).json({ success: false, error: "No Square location found" });
     }
 
+    let note = product + " - " + scent + " (x" + quantity + ")";
+    if (label) note += " | Label: " + String(label);
+
     const body = {
       idempotency_key: crypto.randomUUID(),
       order: {
@@ -87,7 +90,7 @@ module.exports = async (req, res) => {
           base_price_money: { amount: unitPriceCents, currency: "USD" }
         }]
       },
-      payment_note: product + " - " + scent + " (x" + quantity + ")",
+      payment_note: note,
       checkout_options: {
         redirect_url: baseUrl + "/?ref=" + ref
       }
