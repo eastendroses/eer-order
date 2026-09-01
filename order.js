@@ -27,7 +27,8 @@ const PRICES = {
   "Candle": 2300,
   "Diffuser": 1700,
   "Wax Melts": 870,
-  "Room Spray": 1200
+  "Room Spray": 1200,
+  "Tulip Bouquet": 2500
 };
 
 module.exports = async (req, res) => {
@@ -87,7 +88,14 @@ module.exports = async (req, res) => {
         line_items: [{
           name: product + " - " + scent,
           quantity: String(quantity),
-          base_price_money: { amount: unitPriceCents, currency: "USD" }
+          base_price_money: { amount: unitPriceCents, currency: "USD" },
+          taxes: [{
+            uid: "sales-tax",
+            name: "Sales Tax",
+            type: "ADDITIVE",
+            percentage: "8.0",
+            scope: "LINE_ITEM"
+          }]
         }]
       },
       payment_note: note,
