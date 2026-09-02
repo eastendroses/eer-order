@@ -1,22 +1,6 @@
-// ============================================================
-//  East End Roses — Vercel proxy: create a Square payment link
-//  ------------------------------------------------------------
-//  Client order page POSTs here (same origin, no CORS issues).
-//  This function asks the Square Checkout API for a FRESH
-//  payment link for this specific order. Each order gets:
-//    - a unique reference (EER-XXXXXX) stored on the Square order
-//    - a line item "Product - Fragrance" with quantity + price
-//  When the client pays, Square sends a payment.completed webhook
-//  to /api/square-webhook, which logs the PAID order to the sheet.
-//
-//  Required env vars on Vercel:
-//    SQUARE_ACCESS_TOKEN   (production access token, "Production"
-//                           environment — NOT the sandbox token)
-//    SQUARE_LOCATION_ID    (optional override; auto-detected if blank)
-// ============================================================
-
 const crypto = require("crypto");
 
+// Environment variables — set these on Vercel under Settings → Environment Variables.
 const SQUARE_ACCESS_TOKEN = process.env.SQUARE_ACCESS_TOKEN || "";
 const SQUARE_LOCATION_ID = process.env.SQUARE_LOCATION_ID || "";
 const SQUARE_API = "https://connect.squareup.com";
@@ -43,24 +27,53 @@ module.exports = async (req, res) => {
     return res.status(500).json({ success: false, error: "SQUARE_ACCESS_TOKEN not configured" });
   }
 
-  const { product, scent, qty, label } = req.body || {};
-  if (!product || !scent) {
-    return res.status(400).json({ success: false, error: "Missing product or scent" });
+  // Accept both legacy single-item format and new multi-item format.
+  var body = req.body || {};
+  var items = [];
+  if (body.items && Array.isArray(body.items) && body.items.length > 0) {
+    items = body.items;
+  } else if (body.product && body.scent) {
+    items = [{ product: body.product, scent: body.scent, qty: body.qty || 1, label: body.label }];
   }
 
-  const unitPriceCents = PRICES[product];
-  if (!unitPriceCents) {
-    return res.status(400).json({ success: false, error: "Unknown product" });
+  if (items.length === 0) {
+    return res.status(400).json({ success: false, error: "No products provided" });
   }
 
-  const quantity = parseInt(qty, 10) || 1;
-  if (quantity < 1) return res.status(400).json({ success: false, error: "Invalid quantity" });
+  // Validate each item and build line items.
+  var lineItems = [];
+  var noteParts = [];
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var product = item.product;
+    var scent = item.scent;
+    var qty = parseInt(item.qty, 10) || 1;
+    var label = item.label || "";
 
-  const ref = "EER-" + crypto.randomBytes(4).toString("hex").toUpperCase();
-  const baseUrl = "https://" + (req.headers.host || "");
+    if (!product || !scent) {
+      return res.status(400).json({ success: false, error: "Missing product or scent in item " + (i + 1) });
+    }
+    var unitPriceCents = PRICES[product];
+    if (!unitPriceCents) {
+      return res.status(400).json({ success: false, error: "Unknown product: " + product });
+    }
+    if (qty < 1) return res.status(400).json({ success: false, error: "Invalid quantity for " + product });
+
+    lineItems.push({
+      name: product + " - " + scent,
+      quantity: String(qty),
+      base_price_money: { amount: unitPriceCents, currency: "USD" }
+    });
+
+    var part = product + " - " + scent + " (x" + qty + ")";
+    if (label) part += " [Label: " + label + "]";
+    noteParts.push(part);
+  }
+
+  var ref = "EER-" + crypto.randomBytes(4).toString("hex").toUpperCase();
+  var baseUrl = "https://" + (req.headers.host || "");
 
   try {
-    // Resolve a location (the merchant's default business location).
     let locationId = SQUARE_LOCATION_ID;
     if (!locationId) {
       const locRes = await fetch(SQUARE_API + "/v2/locations", {
@@ -78,21 +91,14 @@ module.exports = async (req, res) => {
       return res.status(500).json({ success: false, error: "No Square location found" });
     }
 
-    let note = product + " - " + scent + " (x" + quantity + ")";
-    if (label) note += " | Label: " + String(label);
+    var note = noteParts.join("; ");
 
-    // Create the payment link with 8% sales tax at the order level
-    // (same order shape the Orders API CreateOrder endpoint expects).
-    const body = {
+    const orderBody = {
       idempotency_key: crypto.randomUUID(),
       order: {
         location_id: locationId,
         reference_id: ref,
-        line_items: [{
-          name: product + " - " + scent,
-          quantity: String(quantity),
-          base_price_money: { amount: unitPriceCents, currency: "USD" }
-        }],
+        line_items: lineItems,
         taxes: [{
           uid: "state-sales-tax",
           name: "Sales Tax",
@@ -113,7 +119,7 @@ module.exports = async (req, res) => {
         "Content-Type": "application/json",
         "Square-Version": SQUARE_VERSION
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(orderBody)
     });
 
     const json = await resp.json();

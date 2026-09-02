@@ -6,9 +6,10 @@
 //  order. This function:
 //    1. Verifies the webhook signature (HMAC-SHA256).
 //    2. Fetches the payment + order details from Square.
-//    3. Writes one row to the Google Sheet via the Apps Script
-//       web app (server-side, no CORS): order ref, product,
-//       fragrance, qty, total, buyer name + email, status PAID.
+//    3. Writes one row PER LINE ITEM to the Google Sheet via the
+//       Apps Script web app (server-side, no CORS): order ref,
+//       product, fragrance, qty, total, buyer name + email,
+//       status PAID.
 //  Nothing is logged unless payment really completed.
 //
 //  Required env vars on Vercel:
@@ -52,16 +53,34 @@ async function fetchSquare(path) {
   return resp.json();
 }
 
-function getOrderInfo(order) {
-  const li = (order.line_items && order.line_items[0]) || {};
-  const name = li.name || "";
-  const dash = name.indexOf(" - ");
-  const product = dash >= 0 ? name.slice(0, dash) : name;
-  const scent = dash >= 0 ? name.slice(dash + 3) : "";
-  const qty = parseInt(li.quantity, 10) || 1;
-  const unitMoney = li.base_price_money || {};
-  const unitCents = unitMoney.amount || 0;
-  return { referenceId: order.reference_id || "", product, scent, qty, unitCents };
+// Parse all line items from the order, returning an array.
+function getOrderInfos(order) {
+  var items = order.line_items || [];
+  var results = [];
+  for (var i = 0; i < items.length; i++) {
+    var li = items[i];
+    var name = li.name || "";
+    var dash = name.indexOf(" - ");
+    var product = dash >= 0 ? name.slice(0, dash) : name;
+    var scent = dash >= 0 ? name.slice(dash + 3) : "";
+    var qty = parseInt(li.quantity, 10) || 1;
+    var unitMoney = li.base_price_money || {};
+    var unitCents = unitMoney.amount || 0;
+    results.push({ product: product, scent: scent, qty: qty, unitCents: unitCents });
+  }
+  return results;
+}
+
+// Parse labels from payment note. Format per item: "... [Label: text]"
+// Returns an array of labels in order, matching the line-items array.
+function parseNoteLabels(note) {
+  var parts = note.split("; ");
+  var labels = [];
+  for (var i = 0; i < parts.length; i++) {
+    var match = parts[i].match(/\[Label:\s*([^\]]*)\]/);
+    labels.push(match ? match[1].trim() : "");
+  }
+  return labels;
 }
 
 module.exports = async (req, res) => {
@@ -69,7 +88,7 @@ module.exports = async (req, res) => {
   if (req.method === "GET") {
     return res.status(200).json({
       ok: true,
-      version: "2.1",
+      version: "2.2",
       env: {
         hasAccessToken: !!SQUARE_ACCESS_TOKEN,
         hasSignatureKey: !!SIGNATURE_KEY,
@@ -126,20 +145,21 @@ module.exports = async (req, res) => {
   try {
     const pay = (await fetchSquare("/v2/payments/" + paymentId)).payment || {};
 
-    let info = { referenceId: paymentId, product: "", scent: "", qty: 1, unitCents: 0 };
+    var orderItems = [];
+    var orderRef = paymentId;
     if (pay.order_id) {
       const order = (await fetchSquare("/v2/orders/" + pay.order_id)).order || {};
-      if (order) info = getOrderInfo(order);
+      if (order) {
+        orderRef = order.reference_id || orderRef;
+        orderItems = getOrderInfos(order);
+      }
     }
 
     const email = pay.buyer_email_address || "";
 
-    // Label text (for products like Tulip Bouquet) travels in the
-    // Square payment note as '| Label: <text>' and is logged separately.
-    let labelText = "";
+    // Labels travel in the payment note as [Label: text], one per line item.
     const note = pay.note || "";
-    const labelMatch = note.match(/Label:\s*(.*)/);
-    if (labelMatch) labelText = labelMatch[1].trim();
+    var noteLabels = parseNoteLabels(note);
 
     let customerName = "";
     if (pay.customer_id) {
@@ -154,46 +174,50 @@ module.exports = async (req, res) => {
     const totalMoney = pay.total_money || {};
     const totalUsd = ((totalMoney.amount || 0) / 100).toFixed(2);
 
-    let sheetResult = { written: false };
+    // Write one row per line item to the sheet.
+    var sheetResults = [];
     if (GOOGLE_WEB_APP_URL) {
-      const payload = {
-        ref: info.referenceId || paymentId,
-        product: info.product,
-        scent: info.scent,
-        qty: info.qty,
-        price: totalUsd,
-        label: labelText,
-        name: customerName,
-        email: email,
-        status: "PAID"
-      };
+      for (var i = 0; i < orderItems.length; i++) {
+        var item = orderItems[i];
+        var labelText = noteLabels[i] || "";
 
-      try {
-        const gRes = await fetch(GOOGLE_WEB_APP_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-        const text = await gRes.text();
+        var payload = {
+          ref: orderRef,
+          product: item.product,
+          scent: item.scent,
+          qty: item.qty,
+          price: totalUsd,
+          label: labelText,
+          name: customerName,
+          email: email,
+          status: "PAID"
+        };
+
         try {
-          sheetResult = JSON.parse(text);
-          sheetResult.written = true;
+          const gRes = await fetch(GOOGLE_WEB_APP_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          const text = await gRes.text();
+          try {
+            sheetResults.push(JSON.parse(text));
+          } catch (err) {
+            sheetResults.push({ written: true, raw: text });
+          }
         } catch (err) {
-          sheetResult = { written: true, raw: text };
+          sheetResults.push({ written: false, error: err.toString() });
         }
-      } catch (err) {
-        sheetResult = { written: false, error: err.toString() };
       }
     }
 
     return res.status(200).json({
       ok: true,
-      ref: info.referenceId || paymentId,
-      product: info.product,
-      scent: info.scent,
+      ref: orderRef,
+      items: orderItems.length,
       email: email,
       status: "PAID",
-      sheet: sheetResult
+      sheet: sheetResults
     });
   } catch (error) {
     return res.status(500).json({ error: error.toString() });
