@@ -12,7 +12,7 @@
   ------------------------------------------------------------
   HOW TO EDIT (important):
   - PRODUCTS: edit names, prices, and scents below. Base prices are
-    also used by api/order.js (cents) — keep them in sync. 
+    also used by api/order.js (cents) — keep them in sync.
   - If you arrive back on this page with ?ref=EER-XXXXXX in the
     URL, the page shows a "thank you" confirmation.
 ============================================================ -->
@@ -73,6 +73,23 @@
     color: #f3ece2;
   }
   #eer-order select option { background: #16120e; color: #f3ece2; }
+  #eer-order .sig-toggle { margin-bottom: 10px; }
+  #eer-order .sig-toggle label {
+    display: inline-block;
+    margin: 0 16px 8px 0;
+    color: #f3ece2;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  #eer-order .sig-toggle input[type="radio"] {
+    width: auto;
+    margin: 0 6px 0 0;
+    vertical-align: middle;
+  }
+  #eer-order #eer-sig-name { margin-top: 8px; }
+  #eer-order .sig-hint { font-size: 0.85rem; color: #b9a88f; margin: 6px 0 0; }
   #eer-order .price-line { font-size: 1.2rem; color: #d8c5a6; margin: 8px 0 0; }
   #eer-order button {
     width: 100%;
@@ -154,9 +171,20 @@
       <p class="price-line" id="eer-price"></p>
     </div>
 
-    <div class="field">
+    <div class="field" id="eer-scent-field">
       <label for="eer-scent">Fragrance</label>
       <select id="eer-scent"></select>
+    </div>
+
+    <div class="field" id="eer-signature-field" style="display:none;">
+      <label>Custom Fragrance</label>
+      <div class="sig-toggle">
+        <label><input type="radio" name="eer-sig-mode" id="eer-sig-mode-id" value="id" checked> I have a fragrance ID</label>
+        <label><input type="radio" name="eer-sig-mode" id="eer-sig-mode-name" value="name"> I'll type the name</label>
+      </div>
+      <input type="text" id="eer-sig-id" placeholder="EER-FR-042">
+      <p class="sig-hint">Fragrance IDs look like EER-FR-### — the last 3 digits identify your custom fragrance.</p>
+      <input type="text" id="eer-sig-name" placeholder="Fragrance name" style="display:none;">
     </div>
 
     <div class="field" id="eer-label-field" style="display:none;">
@@ -205,6 +233,12 @@
       scents: CANDLE_SCENTS
     },
     {
+      name: "Signature Fragrance Candle",
+      price: "32.00",
+      scents: [],
+      customFragrance: true
+    },
+    {
       name: "Diffuser",
       price: "17.00",
       scents: [
@@ -244,6 +278,12 @@
   var qtyInput = document.getElementById("eer-qty");
   var labelInput = document.getElementById("eer-label");
   var labelField = document.getElementById("eer-label-field");
+  var scentField = document.getElementById("eer-scent-field");
+  var sigField = document.getElementById("eer-signature-field");
+  var sigModeId = document.getElementById("eer-sig-mode-id");
+  var sigModeName = document.getElementById("eer-sig-mode-name");
+  var sigIdInput = document.getElementById("eer-sig-id");
+  var sigNameInput = document.getElementById("eer-sig-name");
   var priceLine = document.getElementById("eer-price");
   var submitBtn = document.getElementById("eer-submit");
   var statusEl = document.getElementById("eer-status");
@@ -275,6 +315,16 @@
       scentSel.appendChild(opt);
     }
     priceLine.textContent = "Price: $" + prod.price;
+    if (prod.customFragrance) {
+      scentField.style.display = "none";
+      sigField.style.display = "block";
+      updateSigInputs();
+    } else {
+      scentField.style.display = "block";
+      sigField.style.display = "none";
+      sigIdInput.value = "";
+      sigNameInput.value = "";
+    }
     updateLabelField();
   }
 
@@ -288,11 +338,46 @@
     }
   }
 
+  function updateSigInputs() {
+    if (sigModeName.checked) {
+      sigNameInput.style.display = "block";
+      sigIdInput.style.display = "none";
+    } else {
+      sigIdInput.style.display = "block";
+      sigNameInput.style.display = "none";
+    }
+  }
+
+  sigModeId.addEventListener("change", updateSigInputs);
+  sigModeName.addEventListener("change", updateSigInputs);
+
   productSel.addEventListener("change", refreshScent);
 
   submitBtn.addEventListener("click", function () {
     var prod = currentProduct();
-    var scent = scentSel.value;
+    var scent;
+    if (prod.customFragrance) {
+      if (sigModeId.checked) {
+        scent = sigIdInput.value.trim();
+        if (!/^EER-FR-\d{3}$/i.test(scent)) {
+          statusEl.textContent = "Please enter your fragrance ID in the format EER-FR-### (last 3 digits identify your fragrance).";
+          statusEl.className = "status error";
+          sigIdInput.focus();
+          return;
+        }
+        scent = scent.toUpperCase();
+      } else {
+        scent = sigNameInput.value.trim();
+        if (scent === "") {
+          statusEl.textContent = "Please type your fragrance name.";
+          statusEl.className = "status error";
+          sigNameInput.focus();
+          return;
+        }
+      }
+    } else {
+      scent = scentSel.value;
+    }
     var qty = parseInt(qtyInput.value, 10);
     if (isNaN(qty) || qty < 1) qty = 1;
 
