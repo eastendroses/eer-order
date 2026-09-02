@@ -2,20 +2,22 @@
   East End Roses — Order Page (standalone / Vercel)
   ------------------------------------------------------------
   WHAT THIS DOES:
-  Client picks product + scent + quantity. On "Place Order":
+  Client picks one or more products + scents + quantities. On
+  "Place Order":
    1. Page asks /api/order to create a FRESH Square payment link
       for this order (with a unique order ref embedded).
    2. Client is sent to Secure Checkout and pays on Square.
    3. Square sends a payment.completed webhook to /api/square-webhook,
-      which logs the PAID order to your Google Sheet (with name,
-      email, and order ref). Nothing is logged until payment clears.
+      which logs each line item as a separate row to your Google
+      Sheet (with name, email, and order ref). Nothing is logged
+      until payment clears.
   ------------------------------------------------------------
   HOW TO EDIT (important):
   - PRODUCTS: edit names, prices, and scents below. Base prices are
     also used by api/order.js (cents) — keep them in sync.
   - If you arrive back on this page with ?ref=EER-XXXXXX in the
     URL, the page shows a "thank you" confirmation.
-============================================================ -->
+=========================================================== -->
 
 <style>
   #eer-order * { box-sizing: border-box; }
@@ -88,7 +90,7 @@
     margin: 0 6px 0 0;
     vertical-align: middle;
   }
-  #eer-order #eer-sig-name { margin-top: 8px; }
+  #eer-order .sig-name-input { margin-top: 8px; }
   #eer-order .sig-hint { font-size: 0.85rem; color: #b9a88f; margin: 6px 0 0; }
   #eer-order .price-line { font-size: 1.2rem; color: #d8c5a6; margin: 8px 0 0; }
   #eer-order button {
@@ -148,6 +150,53 @@
     line-height: 1.5;
     text-align: center;
   }
+  #eer-order .eer-product-row {
+    border-bottom: 1px solid #3a3126;
+    padding-bottom: 22px;
+    margin-bottom: 22px;
+    position: relative;
+  }
+  #eer-order .eer-product-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 0;
+  }
+  #eer-order .eer-remove-btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: none;
+    border: none;
+    color: #b9a88f;
+    font-size: 1.4rem;
+    cursor: pointer;
+    padding: 0 4px;
+    margin: 0;
+    width: auto;
+    letter-spacing: 0;
+    text-transform: none;
+    line-height: 1;
+  }
+  #eer-order .eer-remove-btn:hover { color: #e0a3a3; }
+  #eer-order .eer-add-btn {
+    width: 100%;
+    background: transparent;
+    color: #d8c5a6;
+    border: 1px dashed #4a3f30;
+    border-radius: 8px;
+    padding: 14px 22px;
+    font-size: 1rem;
+    cursor: pointer;
+    font-family: inherit;
+    letter-spacing: .5px;
+    text-transform: none;
+    margin: 24px 0;
+    transition: background .15s ease, border-color .15s ease;
+  }
+  #eer-order .eer-add-btn:hover {
+    background: #3a3126;
+    border-color: #6a5a40;
+  }
 
   @media (max-width: 600px) {
     #eer-order .brand { font-size: 1.5rem; }
@@ -165,37 +214,9 @@
   </div>
 
   <div class="card">
-    <div class="field">
-      <label for="eer-product">Product</label>
-      <select id="eer-product"></select>
-      <p class="price-line" id="eer-price"></p>
-    </div>
+    <div id="eer-product-rows"></div>
 
-    <div class="field" id="eer-scent-field">
-      <label for="eer-scent">Fragrance</label>
-      <select id="eer-scent"></select>
-    </div>
-
-    <div class="field" id="eer-signature-field" style="display:none;">
-      <label>Custom Fragrance</label>
-      <div class="sig-toggle">
-        <label><input type="radio" name="eer-sig-mode" id="eer-sig-mode-id" value="id" checked> I have a fragrance ID</label>
-        <label><input type="radio" name="eer-sig-mode" id="eer-sig-mode-name" value="name"> I'll type the name</label>
-      </div>
-      <input type="text" id="eer-sig-id" placeholder="EER-FR-042">
-      <p class="sig-hint">Fragrance IDs look like EER-FR-### — the last 3 digits identify your custom fragrance.</p>
-      <input type="text" id="eer-sig-name" placeholder="Fragrance name" style="display:none;">
-    </div>
-
-    <div class="field" id="eer-label-field" style="display:none;">
-      <label for="eer-label">Label Text</label>
-      <input type="text" id="eer-label" placeholder="ex. Happy Birthday!" maxlength="60">
-    </div>
-
-    <div class="field">
-      <label for="eer-qty">Quantity</label>
-      <input type="number" id="eer-qty" value="1" min="1" step="1">
-    </div>
+    <button type="button" class="eer-add-btn" id="eer-add-product">+ Add another product</button>
 
     <button type="button" id="eer-submit">Place Order</button>
     <p class="status" id="eer-status"></p>
@@ -207,16 +228,6 @@
 
 <script>
 (function () {
-  // ============================================================
-  // CONFIG — EDIT THESE
-  // ============================================================
-  // Order logging is handled by the Vercel proxy at /api/order,
-  // which forwards orders to the Google Apps Script server-side.
-  // No web app URL needed here.
-
-  // 1) Products. "price" is shown for reference. The payment link is
-  //    created fresh by /api/order for each order (no links here).
-  //    "scents" is the list of available scents for that product.
   var CANDLE_SCENTS = [
     "Lavender Oasis", "Fresh Eucalyptus", "Blooming Meadow", "Uncharted Forest",
     "Cashmere Plum", "Pomegranate Cider", "Midnight Moon", "Spiced Pear",
@@ -269,123 +280,205 @@
       hasLabelText: true
     }
   ];
-  // ============================================================
-  // END OF CONFIG
-  // ============================================================
 
-  var productSel = document.getElementById("eer-product");
-  var scentSel = document.getElementById("eer-scent");
-  var qtyInput = document.getElementById("eer-qty");
-  var labelInput = document.getElementById("eer-label");
-  var labelField = document.getElementById("eer-label-field");
-  var scentField = document.getElementById("eer-scent-field");
-  var sigField = document.getElementById("eer-signature-field");
-  var sigModeId = document.getElementById("eer-sig-mode-id");
-  var sigModeName = document.getElementById("eer-sig-mode-name");
-  var sigIdInput = document.getElementById("eer-sig-id");
-  var sigNameInput = document.getElementById("eer-sig-name");
-  var priceLine = document.getElementById("eer-price");
+  var rowsContainer = document.getElementById("eer-product-rows");
+  var addBtn = document.getElementById("eer-add-product");
   var submitBtn = document.getElementById("eer-submit");
   var statusEl = document.getElementById("eer-status");
+  var rowCounter = 0;
 
-  function currentProduct() {
+  function findProduct(name) {
     for (var i = 0; i < PRODUCTS.length; i++) {
-      if (PRODUCTS[i].name === productSel.value) return PRODUCTS[i];
+      if (PRODUCTS[i].name === name) return PRODUCTS[i];
     }
     return PRODUCTS[0];
   }
 
-  function populateProducts() {
+  function productOptsHtml() {
+    var html = "";
     for (var i = 0; i < PRODUCTS.length; i++) {
-      var opt = document.createElement("option");
-      opt.value = PRODUCTS[i].name;
-      opt.textContent = PRODUCTS[i].name;
-      productSel.appendChild(opt);
+      html += '<option value="' + PRODUCTS[i].name + '">' + PRODUCTS[i].name + '</option>';
     }
-    refreshScent();
+    return html;
   }
 
-  function refreshScent() {
-    var prod = currentProduct();
-    scentSel.innerHTML = "";
-    for (var i = 0; i < prod.scents.length; i++) {
-      var opt = document.createElement("option");
-      opt.value = prod.scents[i];
-      opt.textContent = prod.scents[i];
-      scentSel.appendChild(opt);
-    }
-    priceLine.textContent = "Price: $" + prod.price;
-    if (prod.customFragrance) {
-      scentField.style.display = "none";
-      sigField.style.display = "block";
-      updateSigInputs();
-    } else {
-      scentField.style.display = "block";
-      sigField.style.display = "none";
-      sigIdInput.value = "";
-      sigNameInput.value = "";
-    }
-    updateLabelField();
+  function buildRow() {
+    rowCounter++;
+    var rowId = rowCounter;
+    var row = document.createElement("div");
+    row.className = "eer-product-row";
+    var opts = productOptsHtml();
+
+    row.innerHTML =
+      '<button type="button" class="eer-remove-btn" title="Remove">&times;</button>' +
+      '<div class="field">' +
+        '<label>Product</label>' +
+        '<select class="eer-product-select">' + opts + '</select>' +
+        '<p class="price-line"></p>' +
+      '</div>' +
+      '<div class="field eer-scent-field">' +
+        '<label>Fragrance</label>' +
+        '<select class="eer-scent-select"></select>' +
+      '</div>' +
+      '<div class="field eer-signature-field" style="display:none;">' +
+        '<label>Custom Fragrance</label>' +
+        '<div class="sig-toggle">' +
+          '<label><input type="radio" class="sig-mode-id" value="id" name="sig-mode-' + rowId + '" checked> I have a fragrance ID</label>' +
+          '<label><input type="radio" class="sig-mode-name" value="name" name="sig-mode-' + rowId + '"> I\'ll type the name</label>' +
+        '</div>' +
+        '<input type="text" class="sig-id-input" placeholder="EER-FR-042">' +
+        '<p class="sig-hint">Fragrance IDs look like EER-FR-### — the last 3 digits identify your custom fragrance.</p>' +
+        '<input type="text" class="sig-name-input" placeholder="Fragrance name" style="display:none;">' +
+      '</div>' +
+      '<div class="field eer-label-field" style="display:none;">' +
+        '<label>Label Text</label>' +
+        '<input type="text" class="eer-label-input" placeholder="ex. Happy Birthday!" maxlength="60">' +
+      '</div>' +
+      '<div class="field">' +
+        '<label>Quantity</label>' +
+        '<input type="number" class="eer-qty-input" value="1" min="1" step="1">' +
+      '</div>';
+
+    return row;
   }
 
-  function updateLabelField() {
-    var prod = currentProduct();
-    if (prod.hasLabelText) {
-      labelField.style.display = "block";
-    } else {
-      labelField.style.display = "none";
-      labelInput.value = "";
+  function initRow(row) {
+    var productSel = row.querySelector(".eer-product-select");
+    var scentSel = row.querySelector(".eer-scent-select");
+    var priceLine = row.querySelector(".price-line");
+    var scentField = row.querySelector(".eer-scent-field");
+    var sigField = row.querySelector(".eer-signature-field");
+    var sigModeId = row.querySelector(".sig-mode-id");
+    var sigModeName = row.querySelector(".sig-mode-name");
+    var sigIdInput = row.querySelector(".sig-id-input");
+    var sigNameInput = row.querySelector(".sig-name-input");
+    var labelField = row.querySelector(".eer-label-field");
+    var labelInput = row.querySelector(".eer-label-input");
+    var removeBtn = row.querySelector(".eer-remove-btn");
+
+    function refreshRow() {
+      var prod = findProduct(productSel.value);
+      scentSel.innerHTML = "";
+      for (var i = 0; i < prod.scents.length; i++) {
+        var opt = document.createElement("option");
+        opt.value = prod.scents[i];
+        opt.textContent = prod.scents[i];
+        scentSel.appendChild(opt);
+      }
+      priceLine.textContent = "Price: $" + prod.price;
+      if (prod.customFragrance) {
+        scentField.style.display = "none";
+        sigField.style.display = "block";
+        updateSig();
+      } else {
+        scentField.style.display = "block";
+        sigField.style.display = "none";
+        sigIdInput.value = "";
+        sigNameInput.value = "";
+      }
+      if (prod.hasLabelText) {
+        labelField.style.display = "block";
+      } else {
+        labelField.style.display = "none";
+        labelInput.value = "";
+      }
     }
+
+    function updateSig() {
+      if (sigModeName.checked) {
+        sigNameInput.style.display = "block";
+        sigIdInput.style.display = "none";
+      } else {
+        sigIdInput.style.display = "block";
+        sigNameInput.style.display = "none";
+      }
+    }
+
+    productSel.addEventListener("change", refreshRow);
+    sigModeId.addEventListener("change", updateSig);
+    sigModeName.addEventListener("change", updateSig);
+    removeBtn.addEventListener("click", function () {
+      row.remove();
+      toggleAddBtn();
+    });
+
+    refreshRow();
   }
 
-  function updateSigInputs() {
-    if (sigModeName.checked) {
-      sigNameInput.style.display = "block";
-      sigIdInput.style.display = "none";
-    } else {
-      sigIdInput.style.display = "block";
-      sigNameInput.style.display = "none";
-    }
+  function addRow() {
+    var row = buildRow();
+    rowsContainer.appendChild(row);
+    initRow(row);
+    toggleAddBtn();
   }
 
-  sigModeId.addEventListener("change", updateSigInputs);
-  sigModeName.addEventListener("change", updateSigInputs);
+  function toggleAddBtn() {
+    addBtn.style.display = rowsContainer.children.length >= 5 ? "none" : "block";
+  }
 
-  productSel.addEventListener("change", refreshScent);
+  addBtn.addEventListener("click", addRow);
+
+  function collectItems() {
+    var rows = rowsContainer.querySelectorAll(".eer-product-row");
+    var items = [];
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      var prodSel = row.querySelector(".eer-product-select");
+      var scentSel = row.querySelector(".eer-scent-select");
+      var qtyInput = row.querySelector(".eer-qty-input");
+      var labelInput = row.querySelector(".eer-label-input");
+      var sigModeId = row.querySelector(".sig-mode-id");
+      var sigIdInput = row.querySelector(".sig-id-input");
+      var sigNameInput = row.querySelector(".sig-name-input");
+
+      var prod = findProduct(prodSel.value);
+      var scent;
+      if (prod.customFragrance) {
+        if (sigModeId.checked) {
+          scent = sigIdInput.value.trim();
+          if (!/^EER-FR-\d{3}$/i.test(scent)) {
+            return { error: "Please enter your fragrance ID in the format EER-FR-###.", el: sigIdInput };
+          }
+          scent = scent.toUpperCase();
+        } else {
+          scent = sigNameInput.value.trim();
+          if (scent === "") {
+            return { error: "Please type your fragrance name.", el: sigNameInput };
+          }
+        }
+      } else {
+        scent = scentSel.value;
+      }
+
+      var qty = parseInt(qtyInput.value, 10);
+      if (isNaN(qty) || qty < 1) qty = 1;
+
+      var label = labelInput.value.trim();
+      if (prod.hasLabelText && label === "") {
+        return { error: "Please enter label text for your Tulip Bouquet.", el: labelInput };
+      }
+
+      items.push({
+        product: prod.name,
+        scent: scent,
+        qty: qty,
+        label: label || undefined
+      });
+    }
+    return { items: items };
+  }
 
   submitBtn.addEventListener("click", function () {
-    var prod = currentProduct();
-    var scent;
-    if (prod.customFragrance) {
-      if (sigModeId.checked) {
-        scent = sigIdInput.value.trim();
-        if (!/^EER-FR-\d{3}$/i.test(scent)) {
-          statusEl.textContent = "Please enter your fragrance ID in the format EER-FR-### (last 3 digits identify your fragrance).";
-          statusEl.className = "status error";
-          sigIdInput.focus();
-          return;
-        }
-        scent = scent.toUpperCase();
-      } else {
-        scent = sigNameInput.value.trim();
-        if (scent === "") {
-          statusEl.textContent = "Please type your fragrance name.";
-          statusEl.className = "status error";
-          sigNameInput.focus();
-          return;
-        }
-      }
-    } else {
-      scent = scentSel.value;
-    }
-    var qty = parseInt(qtyInput.value, 10);
-    if (isNaN(qty) || qty < 1) qty = 1;
-
-    var label = labelInput.value.trim();
-    if (prod.hasLabelText && label === "") {
-      statusEl.textContent = "Please enter label text for your tulip bouquet.";
+    var result = collectItems();
+    if (result.error) {
+      statusEl.textContent = result.error;
       statusEl.className = "status error";
-      labelInput.focus();
+      result.el.focus();
+      return;
+    }
+    if (!result.items || result.items.length === 0) {
+      statusEl.textContent = "Please add at least one product.";
+      statusEl.className = "status error";
       return;
     }
 
@@ -393,22 +486,14 @@
     statusEl.textContent = "Creating your secure payment link...";
     statusEl.className = "status";
 
-    var payload = {
-      product: prod.name,
-      scent: scent,
-      qty: qty
-    };
-    if (prod.hasLabelText) payload.label = label;
-
     fetch("/api/order", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ items: result.items })
     })
       .then(function (res) { return res.json(); })
       .then(function (data) {
         if (data && data.success && data.url) {
-          // Send the client to the fresh Square checkout link.
           window.location.href = data.url;
         } else {
           submitBtn.disabled = false;
@@ -424,7 +509,6 @@
       });
   });
 
-  // Show a thank-you confirmation when the client returns after payment.
   function showThankYou(ref) {
     var card = document.querySelector("#eer-order .card");
     card.innerHTML =
@@ -439,6 +523,6 @@
   var refMatch = window.location.search.match(/[?&]ref=([A-Za-z0-9-]+)/);
   if (refMatch) showThankYou(refMatch[1]);
 
-  populateProducts();
+  addRow();
 })();
 </script>
