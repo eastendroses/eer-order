@@ -25,6 +25,7 @@ const SQUARE_VERSION = "2026-08-19";
 // Unit prices in cents (keep in sync with the order page + pricing.md).
 const PRICES = {
   "Candle": 2300,
+  "Signature Fragrance Candle": 3200,
   "Diffuser": 1700,
   "Wax Melts": 870,
   "Room Spray": 1200,
