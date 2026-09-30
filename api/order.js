@@ -13,7 +13,8 @@ const PRICES = {
   "Diffuser": 1700,
   "Wax Melts": 870,
   "Room Spray": 1200,
-  "Tulip Bouquet": 2500
+  "Tulip Bouquet": 2500,
+  "Pumpkin Patch": 1850
 };
 
 module.exports = async (req, res) => {
